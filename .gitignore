@@ -1,0 +1,7 @@
+node_modules/
+kindred/node_modules/
+dist/
+kindred/dist/
+.env
+kindred/.env
+.DS_Store
