@@ -5,3 +5,5 @@ kindred/dist/
 .env
 kindred/.env
 .DS_Store
+.vite/
+kindred/.vite/
