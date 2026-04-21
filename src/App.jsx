@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, Fragment, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { Analytics } from "@vercel/analytics/react";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -1296,6 +1297,13 @@ const THERAPIST_STEPS = [
     field: { key: 'email', placeholder: 'you@practice.com', inputType: 'email' },
   },
   {
+    id: 'consent', type: 'consent',
+    heading: "Help us build something better?",
+    body: "A short survey (under 2 minutes) helps us understand what therapists like you actually need. Your email is saved either way.",
+    continueLabel: "Continue with survey",
+    skipLabel: "Just save my email",
+  },
+  {
     id: 'practice', type: 'single-select', number: '02',
     question: 'Tell us about your practice.',
     hint: 'Select the option that best describes your current setup.',
@@ -1355,6 +1363,13 @@ const PATIENT_STEPS = [
     field: { key: 'email', placeholder: 'you@email.com', inputType: 'email' },
   },
   {
+    id: 'consent', type: 'consent',
+    heading: "Help us build something better?",
+    body: "A short survey (under 2 minutes) helps us build Kindred around what actually matters to you. Your email is saved either way.",
+    continueLabel: "Continue with survey",
+    skipLabel: "Just save my email",
+  },
+  {
     id: 'history', type: 'single-select', number: '02',
     question: 'Have you tried therapy before?',
     hint: "This helps us understand where you're starting from.",
@@ -1398,9 +1413,10 @@ function FormFlow({ steps, onBack, formType }) {
 
   const step = steps[currentStep];
   const totalSteps = steps.length;
-  const contentSteps = steps.filter(s => s.type !== 'intro' && s.type !== 'thankyou').length;
-  const currentContentStep = steps.slice(0, currentStep + 1).filter(s => s.type !== 'intro' && s.type !== 'thankyou').length;
-  const progress = step.type === 'thankyou' ? 100 : step.type === 'intro' ? 0 : (currentContentStep / contentSteps) * 100;
+  const isNonCounted = (s) => s.type === 'intro' || s.type === 'thankyou' || s.type === 'consent';
+  const contentSteps = steps.filter(s => !isNonCounted(s)).length;
+  const currentContentStep = steps.slice(0, currentStep + 1).filter(s => !isNonCounted(s)).length;
+  const progress = step.type === 'thankyou' ? 100 : (step.type === 'intro' || step.type === 'consent') ? 0 : (currentContentStep / contentSteps) * 100;
 
   const shouldSkipNext = (fromIdx, historyOverride) => {
     const from = steps[fromIdx];
@@ -1409,12 +1425,33 @@ function FormFlow({ steps, onBack, formType }) {
     return from?.id === 'history' && next?.id === 'hardest' && SKIP_HISTORY_IDS.includes(historyVal);
   };
 
-  const submitResponse = async (data) => {
+  const submitResponse = async (data, emailOnly = false) => {
     const table = formType === 'therapist' ? 'therapist_responses' : 'patient_responses';
     const payload = formType === 'therapist'
-      ? { email: data.email, practice: data.practiceType, experience: data.experience, specializations: data.specializations, consults: data.consultHours, willingness: data.willingness, frustration: data.frustration || null }
-      : { email: data.email, therapy_history: data.therapyHistory, barriers: data.barriers, priorities: data.priorities, urgency: data.urgency };
+      ? {
+          email: data.email,
+          practice: emailOnly ? null : data.practiceType,
+          experience: emailOnly ? null : data.experience,
+          specializations: emailOnly ? null : data.specializations,
+          consults: emailOnly ? null : data.consultHours,
+          willingness: emailOnly ? null : data.willingness,
+          frustration: emailOnly ? null : (data.frustration || null),
+        }
+      : {
+          email: data.email,
+          therapy_history: emailOnly ? null : data.therapyHistory,
+          barriers: emailOnly ? null : data.barriers,
+          priorities: emailOnly ? null : data.priorities,
+          urgency: emailOnly ? null : data.urgency,
+        };
     await supabase.from(table).insert(payload);
+  };
+
+  const skipSurvey = () => {
+    submitResponse(formData, true);
+    const thankyouIdx = steps.findIndex(s => s.type === 'thankyou');
+    setCurrentStep(thankyouIdx >= 0 ? thankyouIdx : totalSteps - 1);
+    window.scrollTo(0, 0);
   };
 
   const goNext = (dataOverride) => {
@@ -1460,7 +1497,7 @@ function FormFlow({ steps, onBack, formType }) {
     let count = 0;
     for (let i = 0; i <= currentStep; i++) {
       const s = steps[i];
-      if (s.type === 'intro' || s.type === 'thankyou') continue;
+      if (isNonCounted(s)) continue;
       if (s.id === 'hardest') continue; // always excluded from main count; shown as 2B
       count++;
     }
@@ -1471,7 +1508,7 @@ function FormFlow({ steps, onBack, formType }) {
   const isLastQuestion = steps[nextVisibleIdx]?.type === 'thankyou';
 
   const canProceed = () => {
-    if (step.type === 'intro' || step.type === 'thankyou') return true;
+    if (step.type === 'intro' || step.type === 'thankyou' || step.type === 'consent') return true;
     if (step.optional) return true;
     if (step.type === 'text') {
       if (step.field.inputType === 'email') return isValidEmail(formData[step.field.key]);
@@ -1512,6 +1549,24 @@ function FormFlow({ steps, onBack, formType }) {
               <div className="form-actions" style={{justifyContent:'center',maxWidth:280,margin:'2.5rem auto 0'}}>
                 <button className="btn btn-primary btn-lg" onClick={goNext} style={{width:'100%',justifyContent:'center'}}>
                   Let's begin {Icons.arrow}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step.type === 'consent' && (
+            <div style={{textAlign:'center'}}>
+              <div style={{width:56,height:56,borderRadius:'50%',background:'var(--sage-light)',display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 2rem',color:'var(--sage-dark)'}}>
+                {Icons.check}
+              </div>
+              <h1 className="form-question" style={{fontSize:'clamp(1.75rem,3.5vw,2.25rem)'}}>{step.heading}</h1>
+              <p className="form-hint" style={{maxWidth:460,margin:'0.75rem auto 0',textAlign:'center'}}>{step.body}</p>
+              <div style={{display:'flex',flexDirection:'column',gap:'0.75rem',maxWidth:320,margin:'2.5rem auto 0'}}>
+                <button className="btn btn-primary btn-lg" onClick={() => goNext()} style={{width:'100%',justifyContent:'center'}}>
+                  {step.continueLabel} {Icons.arrow}
+                </button>
+                <button className="btn btn-secondary" onClick={skipSurvey} style={{width:'100%',justifyContent:'center'}}>
+                  {step.skipLabel}
                 </button>
               </div>
             </div>
@@ -1660,6 +1715,7 @@ export default function App() {
       {page === 'therapist-landing' && <TherapistLandingPage onNavigate={navigate} />}
       {page === 'therapist' && <FormFlow steps={THERAPIST_STEPS} onBack={() => navigate('therapist-landing')} formType="therapist" />}
       {page === 'patient' && <FormFlow steps={PATIENT_STEPS} onBack={() => navigate('home')} formType="patient" />}
+      <Analytics />
     </div>
   );
 }
